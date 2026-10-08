@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Krathong Fin In Fest Photobooth</title>
+<meta name="theme-color" content="#2a1450">
+<style>
+  /* ===================== ตั้งค่าสีหลัก (แก้ได้) ===================== */
+  :root{
+    --bg:#1b0e36; --bg2:#2a1450; --gold:#f5c451; --pink:#ff6fae;
+    --text:#ffffff; --muted:#c9bde6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;background:var(--bg);color:var(--text);
+    font-family:"Sarabun","Prompt","Tahoma",system-ui,sans-serif;overflow:hidden}
+  .app{height:100%;display:flex;flex-direction:column;align-items:center;
+    padding:10px 10px calc(10px + env(safe-area-inset-bottom))}
+  header{text-align:center;margin-bottom:6px}
+  header h1{font-size:20px;color:var(--gold);letter-spacing:.5px}
+  header p{font-size:12px;color:var(--muted)}
+
+  /* พื้นที่แสดงกล้อง + กรอบ (สัดส่วน 2:3 เท่ากรอบ) */
+  .stage{position:relative;width:min(100%, calc((100dvh - 230px) * 2 / 3));
+    aspect-ratio:2/3;border-radius:14px;overflow:hidden;background:#000;
+    box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .stage video,.stage .frame,.stage .result{position:absolute;inset:0;width:100%;height:100%}
+  .stage video{object-fit:cover}
+  .stage video.mirror{transform:scaleX(-1)}
+  .stage .frame{object-fit:fill;pointer-events:none}
+  .stage .result{object-fit:contain;background:#000;display:none}
+  .count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    font-size:120px;font-weight:800;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,.7)}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+  .flash.on{animation:fl .4s ease}
+  @keyframes fl{0%{opacity:.9}100%{opacity:0}}
+
+  .msg{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;padding:24px;gap:14px;background:var(--bg2)}
+  .msg p{font-size:15px;line-height:1.6;color:var(--muted)}
+
+  /* แถบเลือกกรอบ */
+  .frames{display:flex;gap:8px;margin:10px 0 8px;overflow-x:auto;max-width:100%;padding:2px}
+  .frames img{width:48px;height:72px;border-radius:8px;border:3px solid transparent;
+    cursor:pointer;flex:0 0 auto;background:#000;object-fit:cover}
+  .frames img.active{border-color:var(--gold)}
+
+  /* ปุ่ม */
+  .bar{display:flex;gap:14px;align-items:center;justify-content:center}
+  button{font-family:inherit;border:0;cursor:pointer;color:#fff}
+  .round{width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.15);font-size:22px}
+  .shot{width:72px;height:72px;border-radius:50%;background:#fff;border:5px solid var(--pink);
+    box-shadow:0 0 0 4px rgba(255,255,255,.25)}
+  .shot:active{transform:scale(.94)}
+  .pill{padding:12px 20px;border-radius:999px;font-size:16px;font-weight:700;background:var(--pink)}
+  .pill.alt{background:rgba(255,255,255,.18)}
+  .pill.gold{background:var(--gold);color:#3a2300}
+  .hidden{display:none!important}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>✨ Krathong Fin In Fest ✨</h1>
+    <p>เลือกกรอบ • กดถ่าย • บันทึกรูปลงเครื่องได้ทันที</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline autoplay muted></video>
+    <img class="frame" id="frameImg" alt="">
+    <img class="result" id="result" alt="รูปที่ถ่าย">
+    <div class="count" id="count"></div>
+    <div class="flash" id="flash"></div>
+    <div class="msg" id="msg">
+      <p>📸 กดปุ่มด้านล่างเพื่อเปิดกล้อง<br>แล้วกด <b>"อนุญาต (Allow)"</b> เมื่อระบบถาม</p>
+      <button class="pill gold" id="startBtn">เปิดกล้อง</button>
+    </div>
+  </div>
+
+  <div class="frames" id="frames"></div>
+
+  <!-- โหมดถ่าย -->
+  <div class="bar" id="camBar">
+    <button class="round" id="timerBtn" title="ตั้งเวลา">⏱️</button>
+    <button class="shot" id="shotBtn" aria-label="ถ่ายรูป"></button>
+    <button class="round" id="flipBtn" title="สลับกล้อง">🔄</button>
+  </div>
+  <!-- โหมดหลังถ่าย -->
+  <div class="bar hidden" id="resBar">
+    <button class="pill alt" id="retakeBtn">↺ ถ่ายใหม่</button>
+    <button class="pill" id="saveBtn">💾 บันทึกรูป</button>
+    <button class="pill alt hidden" id="shareBtn">📤 แชร์</button>
+  </div>
+  <div class="hint" id="hint">⏱️ นับถอยหลัง 3 วินาที</div>
+</div>
+
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+/* ===================== ตั้งค่า (แก้ได้) ===================== */
+// รายชื่อไฟล์กรอบ: ใส่ไฟล์ PNG ที่ช่องกลางโปร่งใส ไว้ในโฟลเดอร์ frames
+const FRAMES = [
+  { file: "frames/frame1.png", thumb: "frames/thumb1.png", name: "ริมน้ำยามค่ำคืน" },
+  { file: "frames/frame2.png", thumb: "frames/thumb2.png", name: "Eco Reuse" },
+  { file: "frames/frame3.png", thumb: "frames/thumb3.png", name: "น่ารักพาสเทล" },
+  { file: "frames/frame4.png", thumb: "frames/thumb4.png", name: "Eco-Digital" },
+  { file: "frames/frame5.png", thumb: "frames/thumb5.png", name: "ไทยคลาสสิก" },
+];
+const OUT_W = 1080, OUT_H = 1620;      // ขนาดรูปที่บันทึก (สัดส่วน 2:3)
+const FILE_PREFIX = "KrathongFinInFest"; // ชื่อไฟล์รูปที่บันทึก
+/* ========================================================== */
+
+const $ = id => document.getElementById(id);
+const video=$("video"), frameImg=$("frameImg"), result=$("result"), canvas=$("canvas");
+let stream=null, facing="user", current=0, timerSec=3, lastBlob=null;
+const frameCache = FRAMES.map(f => { const i=new Image(); i.src=f.file; return i; });
+
+// สร้างปุ่มเลือกกรอบ
+FRAMES.forEach((f,i)=>{
+  const t=document.createElement("img");
+  t.src=f.thumb||f.file; t.alt=f.name; t.title=f.name;
+  t.onclick=()=>selectFrame(i);
+  $("frames").appendChild(t);
+});
+function selectFrame(i){
+  current=i; frameImg.src=FRAMES[i].file;
+  [...$("frames").children].forEach((el,k)=>el.classList.toggle("active",k===i));
+}
+selectFrame(0);
+
+// เปิดกล้อง
+async function startCamera(){
+  if(!navigator.mediaDevices?.getUserMedia){
+    showMsg("❌ เบราว์เซอร์นี้ไม่รองรับกล้อง<br>กรุณาเปิดลิงก์ด้วย <b>Chrome</b> หรือ <b>Safari</b><br>(ถ้าเปิดจาก LINE ให้กด ⋯ แล้วเลือก \"เปิดในเบราว์เซอร์\")");
+    return;
+  }
+  try{
+    stream?.getTracks().forEach(t=>t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:facing, width:{ideal:1920}, height:{ideal:1440} }, audio:false });
+    video.srcObject=stream;
+    video.classList.toggle("mirror", facing==="user");
+    $("msg").classList.add("hidden");
+  }catch(e){
+    showMsg("❌ เปิดกล้องไม่ได้<br>กรุณาอนุญาตการใช้กล้องในการตั้งค่าเบราว์เซอร์ แล้วลองใหม่<br><small>("+e.name+")</small>");
+  }
+}
+function showMsg(html){
+  $("msg").classList.remove("hidden");
+  $("msg").innerHTML='<p>'+html+'</p><button class="pill gold" onclick="startCamera()">ลองอีกครั้ง</button>';
+}
+$("startBtn").onclick=startCamera;
+$("flipBtn").onclick=()=>{ facing = facing==="user" ? "environment" : "user"; startCamera(); };
+$("timerBtn").onclick=()=>{
+  timerSec = timerSec===3 ? 0 : 3;
+  $("hint").textContent = timerSec ? "⏱️ นับถอยหลัง 3 วินาที" : "⚡ ถ่ายทันที";
+};
+
+// ถ่ายรูป
+$("shotBtn").onclick=async()=>{
+  if(!stream){ startCamera(); return; }
+  for(let s=timerSec;s>0;s--){
+    $("count").style.display="flex"; $("count").textContent=s;
+    await new Promise(r=>setTimeout(r,1000));
+  }
+  $("count").style.display="none";
+  $("flash").classList.remove("on"); void $("flash").offsetWidth; $("flash").classList.add("on");
+  capture();
+};
+
+function capture(){
+  canvas.width=OUT_W; canvas.height=OUT_H;
+  const ctx=canvas.getContext("2d");
+  // วาดภาพกล้องแบบ "cover" ให้เต็มพื้นที่ 2:3
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const scale=Math.max(OUT_W/vw, OUT_H/vh);
+  const dw=vw*scale, dh=vh*scale, dx=(OUT_W-dw)/2, dy=(OUT_H-dh)/2;
+  ctx.save();
+  if(facing==="user"){ ctx.translate(OUT_W,0); ctx.scale(-1,1); } // กลับด้านให้เหมือนกระจก
+  ctx.drawImage(video,dx,dy,dw,dh);
+  ctx.restore();
+  // วาดกรอบทับ
+  ctx.drawImage(frameCache[current],0,0,OUT_W,OUT_H);
+  canvas.toBlob(b=>{
+    lastBlob=b;
+    result.src=URL.createObjectURL(b);
+    result.style.display="block";
+    toggleMode(true);
+  },"image/jpeg",0.92);
+}
+
+function toggleMode(showResult){
+  $("camBar").classList.toggle("hidden",showResult);
+  $("resBar").classList.toggle("hidden",!showResult);
+  $("frames").classList.toggle("hidden",showResult);
+  $("hint").textContent = showResult
+    ? "iPhone: กด \"แชร์\" แล้วเลือก \"บันทึกรูปภาพ\" เพื่อเก็บลงอัลบั้ม"
+    : (timerSec ? "⏱️ นับถอยหลัง 3 วินาที" : "⚡ ถ่ายทันที");
+  const canShare = !!(navigator.canShare && lastBlob &&
+    navigator.canShare({files:[new File([lastBlob],"x.jpg",{type:"image/jpeg"})]}));
+  $("shareBtn").classList.toggle("hidden", !(showResult && canShare));
+}
+$("retakeBtn").onclick=()=>{ result.style.display="none"; toggleMode(false); };
+
+function fileName(){
+  const d=new Date(), p=n=>String(n).padStart(2,"0");
+  return `${FILE_PREFIX}_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.jpg`;
+}
+$("saveBtn").onclick=()=>{
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(lastBlob); a.download=fileName();
+  document.body.appendChild(a); a.click(); a.remove();
+};
+$("shareBtn").onclick=async()=>{
+  try{
+    await navigator.share({ files:[new File([lastBlob],fileName(),{type:"image/jpeg"})],
+      title:"Krathong Fin In Fest", text:"#KrathongFinInFest" });
+  }catch(e){}
+};
+</script>
+</body>
+</html>
