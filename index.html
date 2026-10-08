@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<title>Krathong Fin In Fest Photobooth</title>
+<title>Krathong FinInFest Photobooth</title>
 <meta name="theme-color" content="#2a1450">
 <style>
   /* ===================== ตั้งค่าสีหลัก (แก้ได้) ===================== */
@@ -66,7 +66,7 @@
 <body>
 <div class="app">
   <header>
-    <h1>✨ Krathong Fin In Fest ✨</h1>
+    <h1>✨ Krathong FinInFest ✨</h1>
     <p>เลือกกรอบ • กดถ่าย • บันทึกรูปลงเครื่องได้ทันที</p>
   </header>
 
@@ -255,7 +255,7 @@ $("saveBtn").onclick=()=>{
 $("shareBtn").onclick=async()=>{
   try{
     await navigator.share({ files:[new File([lastBlob],fileName(),{type:"image/jpeg"})],
-      title:"Krathong Fin In Fest", text:"#KrathongFinInFest" });
+      title:"Krathong FinInFest", text:"#KrathongFinInFest" });
   }catch(e){}
 };
 </script>
