@@ -28,6 +28,7 @@
   .stage video{object-fit:cover}
   .stage video.mirror{transform:scaleX(-1)}
   .stage .frame{object-fit:fill;pointer-events:none}
+  .stage .frame.broken{visibility:hidden}
   .stage .result{object-fit:contain;background:#000;display:none}
   .count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
     font-size:120px;font-weight:800;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,.7)}
@@ -40,7 +41,9 @@
   .msg p{font-size:15px;line-height:1.6;color:var(--muted)}
 
   /* แถบเลือกกรอบ */
-  .frames{display:flex;gap:8px;margin:10px 0 8px;overflow-x:auto;max-width:100%;padding:2px}
+  .frames{display:flex;gap:8px;margin:10px 0 8px;overflow-x:auto;overflow-y:hidden;
+    max-width:100%;padding:2px;scrollbar-width:none}
+  .frames::-webkit-scrollbar{display:none}
   .frames img{width:48px;height:72px;border-radius:8px;border:3px solid transparent;
     cursor:pointer;flex:0 0 auto;background:#000;object-fit:cover}
   .frames img.active{border-color:var(--gold)}
@@ -57,6 +60,7 @@
   .pill.gold{background:var(--gold);color:#3a2300}
   .hidden{display:none!important}
   .hint{font-size:12px;color:var(--muted);margin-top:6px;text-align:center}
+  .warn{color:#ffb4b4}
 </style>
 </head>
 <body>
@@ -99,34 +103,69 @@
 
 <script>
 /* ===================== ตั้งค่า (แก้ได้) ===================== */
-// รายชื่อไฟล์กรอบ: ใส่ไฟล์ PNG ที่ช่องกลางโปร่งใส ไว้ในโฟลเดอร์ frames
+// รายชื่อไฟล์กรอบ: ไฟล์ PNG ที่ช่องกลางโปร่งใส
+// ใส่ชื่อไฟล์ให้ตรงกับใน GitHub ทุกตัวอักษร (ตัวพิมพ์เล็ก/ใหญ่ และขีดล่างต้องตรง)
 const FRAMES = [
-  { file: "frames/frame1.png", thumb: "frames/thumb1.png", name: "ริมน้ำยามค่ำคืน" },
-  { file: "frames/frame2.png", thumb: "frames/thumb2.png", name: "Eco Reuse" },
-  { file: "frames/frame3.png", thumb: "frames/thumb3.png", name: "น่ารักพาสเทล" },
-  { file: "frames/frame4.png", thumb: "frames/thumb4.png", name: "Eco-Digital" },
-  { file: "frames/frame5.png", thumb: "frames/thumb5.png", name: "ไทยคลาสสิก" },
+  { file: "Designer__32_-removebg-preview.png", name: "กรอบ 1" },
+  { file: "Designer__34_-removebg-preview.png", name: "กรอบ 2" },
+  { file: "Designer__36_-removebg-preview.png", name: "กรอบ 3" },
+  { file: "Designer__37_-removebg-preview.png", name: "กรอบ 4" },
+  { file: "Designer__38_-removebg-preview.png", name: "กรอบ 5" },
 ];
-const OUT_W = 1080, OUT_H = 1620;      // ขนาดรูปที่บันทึก (สัดส่วน 2:3)
+const OUT_W = 1080, OUT_H = 1620;        // ขนาดรูปที่บันทึก (สัดส่วน 2:3)
 const FILE_PREFIX = "KrathongFinInFest"; // ชื่อไฟล์รูปที่บันทึก
 /* ========================================================== */
 
 const $ = id => document.getElementById(id);
 const video=$("video"), frameImg=$("frameImg"), result=$("result"), canvas=$("canvas");
-let stream=null, facing="user", current=0, timerSec=3, lastBlob=null;
-const frameCache = FRAMES.map(f => { const i=new Image(); i.src=f.file; return i; });
+let stream=null, facing="user", current=0, timerSec=3, lastBlob=null, missing=new Set();
+
+// โหลดรูปโดยลองหลายตำแหน่ง: frames/xxx.png → xxx.png → Frames/xxx.png
+function loadWithFallback(img, path, onFail){
+  const name = path.split("/").pop();
+  const tries = [path, name, "Frames/" + name, "frames/" + name.toUpperCase()];
+  let k = 0;
+  img.onerror = () => {
+    k++;
+    if (k < tries.length) { img.src = tries[k]; }
+    else { img.classList.add("broken"); onFail && onFail(path); }
+  };
+  img.onload = () => img.classList.remove("broken");
+  img.src = tries[0];
+}
+function reportMissing(path){
+  missing.add(path.split("/").pop());
+  $("hint").innerHTML = '<span class="warn">⚠️ หาไฟล์กรอบไม่พบ: ' +
+    [...missing].join(", ") + '</span>';
+}
+
+// โหลดกรอบเก็บไว้ใช้ตอนรวมรูป
+const frameCache = FRAMES.map(f => {
+  const i = new Image();
+  loadWithFallback(i, f.file, reportMissing);
+  return i;
+});
 
 // สร้างปุ่มเลือกกรอบ
 FRAMES.forEach((f,i)=>{
   const t=document.createElement("img");
-  t.src=f.thumb||f.file; t.alt=f.name; t.title=f.name;
+  t.alt=f.name; t.title=f.name;
+  // ถ้าไม่มีรูปย่อ ให้ใช้รูปกรอบจริงแทน
+  loadWithFallback(t, f.thumb || f.file, () => {
+    if (f.thumb) { const t2=new Image(); loadWithFallback(t2, f.file); t.onerror=null; t.src=f.file; }
+  });
   t.onclick=()=>selectFrame(i);
   $("frames").appendChild(t);
 });
+
 function selectFrame(i){
-  current=i; frameImg.src=FRAMES[i].file;
+  current=i;
+  frameImg.src = frameCache[i].src || FRAMES[i].file;
+  frameImg.classList.toggle("broken", frameCache[i].classList.contains("broken"));
   [...$("frames").children].forEach((el,k)=>el.classList.toggle("active",k===i));
 }
+// รอให้กรอบแรกโหลดเสร็จก่อนแสดง
+frameCache[0].addEventListener("load", () => selectFrame(current), { once:true });
 selectFrame(0);
 
 // เปิดกล้อง
@@ -180,8 +219,9 @@ function capture(){
   if(facing==="user"){ ctx.translate(OUT_W,0); ctx.scale(-1,1); } // กลับด้านให้เหมือนกระจก
   ctx.drawImage(video,dx,dy,dw,dh);
   ctx.restore();
-  // วาดกรอบทับ
-  ctx.drawImage(frameCache[current],0,0,OUT_W,OUT_H);
+  // วาดกรอบทับ (ถ้าโหลดสำเร็จ)
+  const f=frameCache[current];
+  if(f.complete && f.naturalWidth>0) ctx.drawImage(f,0,0,OUT_W,OUT_H);
   canvas.toBlob(b=>{
     lastBlob=b;
     result.src=URL.createObjectURL(b);
