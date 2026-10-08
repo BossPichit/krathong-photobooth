@@ -102,71 +102,90 @@
 <canvas id="canvas" class="hidden"></canvas>
 
 <script>
-/* ===================== ตั้งค่า (แก้ได้) ===================== */
-// รายชื่อไฟล์กรอบ: ไฟล์ PNG ที่ช่องกลางโปร่งใส
-// ใส่ชื่อไฟล์ให้ตรงกับใน GitHub ทุกตัวอักษร (ตัวพิมพ์เล็ก/ใหญ่ และขีดล่างต้องตรง)
-const FRAMES = [
-  { file: "Designer__32_-removebg-preview.png", name: "กรอบ 1" },
-  { file: "Designer__34_-removebg-preview.png", name: "กรอบ 2" },
-  { file: "Designer__36_-removebg-preview.png", name: "กรอบ 3" },
-  { file: "Designer__37_-removebg-preview.png", name: "กรอบ 4" },
-  { file: "Designer__38_-removebg-preview.png", name: "กรอบ 5" },
-];
+/* ===================== ตั้งค่า (ปกติไม่ต้องแก้) ===================== */
+// เว็บจะค้นหาไฟล์กรอบ (.png) ให้อัตโนมัติ
+//   1) ในโฟลเดอร์ชื่อ "frames" (แนะนำ)
+//   2) ถ้าไม่มีโฟลเดอร์ frames จะใช้ไฟล์ .png ที่อยู่ชั้นเดียวกับ index.html
+// เพิ่มกรอบ = อัปโหลดไฟล์ .png / ลบกรอบ = ลบไฟล์ .png  (เรียงลำดับตามชื่อไฟล์)
+const FRAME_FOLDER = "frames";
 const OUT_W = 1080, OUT_H = 1620;        // ขนาดรูปที่บันทึก (สัดส่วน 2:3)
 const FILE_PREFIX = "KrathongFinInFest"; // ชื่อไฟล์รูปที่บันทึก
-/* ========================================================== */
+/* ================================================================== */
 
 const $ = id => document.getElementById(id);
 const video=$("video"), frameImg=$("frameImg"), result=$("result"), canvas=$("canvas");
-let stream=null, facing="user", current=0, timerSec=3, lastBlob=null, missing=new Set();
+let stream=null, facing="user", current=0, timerSec=3, lastBlob=null;
+let FRAMES=[], frameCache=[];
 
-// โหลดรูปโดยลองหลายตำแหน่ง: frames/xxx.png → xxx.png → Frames/xxx.png
-function loadWithFallback(img, path, onFail){
-  const name = path.split("/").pop();
-  const tries = [path, name, "Frames/" + name, "frames/" + name.toUpperCase()];
-  let k = 0;
-  img.onerror = () => {
-    k++;
-    if (k < tries.length) { img.src = tries[k]; }
-    else { img.classList.add("broken"); onFail && onFail(path); }
-  };
-  img.onload = () => img.classList.remove("broken");
-  img.src = tries[0];
+// หาเจ้าของและชื่อ repo จากลิงก์เว็บ เช่น bosspichit.github.io/krathong-photobooth/
+function repoInfo(){
+  const owner = location.hostname.split(".")[0];
+  const seg = location.pathname.split("/").filter(Boolean);
+  const repo = (seg.length && !seg[0].includes(".")) ? seg[0] : owner + ".github.io";
+  return { owner, repo };
 }
-function reportMissing(path){
-  missing.add(path.split("/").pop());
-  $("hint").innerHTML = '<span class="warn">⚠️ หาไฟล์กรอบไม่พบ: ' +
-    [...missing].join(", ") + '</span>';
+const isPng = n => /\.png$/i.test(n);
+const byName = (a,b) => a.localeCompare(b, undefined, {numeric:true, sensitivity:"base"});
+
+// วิธีที่ 1: GitHub API
+async function listViaGitHub(owner, repo, folder){
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${folder}?t=${Date.now()}`;
+  const r = await fetch(url, {cache:"no-store"});
+  if (r.status === 404) return [];
+  if (!r.ok) throw new Error("github " + r.status);
+  const j = await r.json();
+  return Array.isArray(j) ? j.filter(x=>x.type==="file" && isPng(x.name)).map(x=>x.path) : [];
+}
+// วิธีที่ 2 (สำรอง): jsDelivr
+async function listViaJsDelivr(owner, repo){
+  const r = await fetch(`https://data.jsdelivr.com/v1/packages/gh/${owner}/${repo}@main?structure=flat`);
+  if (!r.ok) throw new Error("jsdelivr " + r.status);
+  const j = await r.json();
+  return (j.files||[]).map(f=>f.name.replace(/^\//,"")).filter(isPng);
+}
+async function discoverFrames(){
+  const { owner, repo } = repoInfo();
+  let paths = [];
+  try {
+    paths = await listViaGitHub(owner, repo, FRAME_FOLDER);
+    if (!paths.length) paths = await listViaGitHub(owner, repo, "");
+  } catch(e) {
+    try {
+      const all = await listViaJsDelivr(owner, repo);
+      paths = all.filter(p=>p.startsWith(FRAME_FOLDER + "/"));
+      if (!paths.length) paths = all.filter(p=>!p.includes("/"));
+    } catch(e2) { paths = []; }
+  }
+  return paths.sort(byName).map(p => ({ file: p, name: p.split("/").pop().replace(/\.png$/i,"") }));
 }
 
-// โหลดกรอบเก็บไว้ใช้ตอนรวมรูป
-const frameCache = FRAMES.map(f => {
-  const i = new Image();
-  loadWithFallback(i, f.file, reportMissing);
-  return i;
-});
-
-// สร้างปุ่มเลือกกรอบ
-FRAMES.forEach((f,i)=>{
-  const t=document.createElement("img");
-  t.alt=f.name; t.title=f.name;
-  // ถ้าไม่มีรูปย่อ ให้ใช้รูปกรอบจริงแทน
-  loadWithFallback(t, f.thumb || f.file, () => {
-    if (f.thumb) { const t2=new Image(); loadWithFallback(t2, f.file); t.onerror=null; t.src=f.file; }
+function buildFrames(){
+  $("frames").innerHTML = "";
+  frameCache = FRAMES.map(f => { const i=new Image(); i.src=encodeURI(f.file); return i; });
+  FRAMES.forEach((f,i)=>{
+    const t=document.createElement("img");
+    t.src=encodeURI(f.file); t.alt=f.name; t.title=f.name;
+    t.onclick=()=>selectFrame(i);
+    $("frames").appendChild(t);
   });
-  t.onclick=()=>selectFrame(i);
-  $("frames").appendChild(t);
-});
-
+  selectFrame(0);
+}
 function selectFrame(i){
-  current=i;
-  frameImg.src = frameCache[i].src || FRAMES[i].file;
-  frameImg.classList.toggle("broken", frameCache[i].classList.contains("broken"));
+  if (!FRAMES.length) return;
+  current=i; frameImg.src=encodeURI(FRAMES[i].file);
   [...$("frames").children].forEach((el,k)=>el.classList.toggle("active",k===i));
 }
-// รอให้กรอบแรกโหลดเสร็จก่อนแสดง
-frameCache[0].addEventListener("load", () => selectFrame(current), { once:true });
-selectFrame(0);
+
+(async () => {
+  $("hint").textContent = "⏳ กำลังโหลดกรอบรูป...";
+  FRAMES = await discoverFrames();
+  if (!FRAMES.length) {
+    $("hint").innerHTML = '<span class="warn">⚠️ ไม่พบไฟล์กรอบ (.png) กรุณาลองรีเฟรชหน้าอีกครั้ง</span>';
+    return;
+  }
+  buildFrames();
+  $("hint").textContent = timerSec ? "⏱️ นับถอยหลัง 3 วินาที" : "⚡ ถ่ายทันที";
+})();
 
 // เปิดกล้อง
 async function startCamera(){
@@ -221,7 +240,7 @@ function capture(){
   ctx.restore();
   // วาดกรอบทับ (ถ้าโหลดสำเร็จ)
   const f=frameCache[current];
-  if(f.complete && f.naturalWidth>0) ctx.drawImage(f,0,0,OUT_W,OUT_H);
+  if(f && f.complete && f.naturalWidth>0) ctx.drawImage(f,0,0,OUT_W,OUT_H);
   canvas.toBlob(b=>{
     lastBlob=b;
     result.src=URL.createObjectURL(b);
